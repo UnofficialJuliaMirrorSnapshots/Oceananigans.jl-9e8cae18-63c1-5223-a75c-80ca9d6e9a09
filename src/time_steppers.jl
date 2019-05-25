@@ -74,7 +74,7 @@ function time_step!(model::Model{A}, Nt, Δt) where A <: Architecture
         @launch device(arch) calculate_interior_source_terms!(grid, constants, eos, cfg, uvw..., TS..., pr.pHY′.data, Gⁿ..., forcing, threads=(Tx, Ty), blocks=(Bx, By, Bz))
                              calculate_boundary_source_terms!(model)
         @launch device(arch) adams_bashforth_update_source_terms!(grid, Gⁿ..., G⁻..., χ, threads=(Tx, Ty), blocks=(Bx, By, Bz))
-        @launch device(arch) calculate_source_term_divergence!(arch, grid, Guvw..., RHS.data, threads=(Tx, Ty), blocks=(Bx, By, Bz))
+        @launch device(arch) calculate_poisson_right_hand_side!(arch, grid, Δt, uvw..., Guvw..., RHS.data, threads=(Tx, Ty), blocks=(Bx, By, Bz))
 
         if arch == CPU()
             solve_poisson_3d_ppn_planned!(poisson_solver, grid, RHS, ϕ)
@@ -85,6 +85,7 @@ function time_step!(model::Model{A}, Nt, Δt) where A <: Architecture
         end
 
         @launch device(arch) update_velocities_and_tracers!(grid, uvw..., TS..., pr.pNHS.data, Gⁿ..., G⁻..., Δt, threads=(Tx, Ty), blocks=(Bx, By, Bz))
+        @launch device(arch) compute_w_from_continuity!(grid, uvw..., threads=(Tx, Ty), blocks=(Bx, By))
 
         clock.time += Δt
         clock.iteration += 1
@@ -149,14 +150,14 @@ function calculate_interior_source_terms!(grid::Grid, constants, eos, cfg, u, v,
             @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
                 # u-momentum equation
                 @inbounds Gu[i, j, k] = (-u∇u(grid, u, v, w, i, j, k)
-                                            + fCor*avg_xy(grid, v, i, j, k)
+                                            + Gu_cori(grid, v, fCor, i, j, k)
                                             - δx_c2f(grid, pHY′, i, j, k) / (Δx * ρ₀)
                                             + 𝜈∇²u(grid, u, 𝜈h, 𝜈v, i, j, k)
                                             + F.u(grid, u, v, w, T, S, i, j, k))
 
                 # v-momentum equation
                 @inbounds Gv[i, j, k] = (-u∇v(grid, u, v, w, i, j, k)
-                                            - fCor*avg_xy(grid, u, i, j, k)
+                                            + Gv_cori(grid, u, fCor, i, j, k)
                                             - δy_c2f(grid, pHY′, i, j, k) / (Δy * ρ₀)
                                             + 𝜈∇²v(grid, v, 𝜈h, 𝜈v, i, j, k)
                                             + F.v(grid, u, v, w, T, S, i, j, k))
@@ -198,12 +199,12 @@ function adams_bashforth_update_source_terms!(grid::Grid, Gu, Gv, Gw, GT, GS, Gp
 end
 
 "Store previous value of the source term and calculate current source term."
-function calculate_source_term_divergence!(::CPU, grid::Grid, Gu, Gv, Gw, RHS)
+function calculate_poisson_right_hand_side!(::CPU, grid::Grid, Δt, u, v, w, Gu, Gv, Gw, RHS)
     @loop for k in (1:grid.Nz; blockIdx().z)
         @loop for j in (1:grid.Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
             @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
                 # Calculate divergence of the RHS source terms (Gu, Gv, Gw).
-                @inbounds RHS[i, j, k] = div_f2c(grid, Gu, Gv, Gw, i, j, k)
+                @inbounds RHS[i, j, k] = div_f2c(grid, u, v, w, i, j, k) / Δt + div_f2c(grid, Gu, Gv, Gw, i, j, k)
             end
         end
     end
@@ -211,7 +212,7 @@ function calculate_source_term_divergence!(::CPU, grid::Grid, Gu, Gv, Gw, RHS)
     @synchronize
 end
 
-function calculate_source_term_divergence!(::GPU, grid::Grid, Gu, Gv, Gw, RHS)
+function calculate_poisson_right_hand_side!(::GPU, grid::Grid, Δt, u, v, w, Gu, Gv, Gw, RHS)
     Nx, Ny, Nz = grid.Nx, grid.Ny, grid.Nz
     @loop for k in (1:Nz; blockIdx().z)
         @loop for j in (1:Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
@@ -219,9 +220,9 @@ function calculate_source_term_divergence!(::GPU, grid::Grid, Gu, Gv, Gw, RHS)
                 # Calculate divergence of the RHS source terms (Gu, Gv, Gw) and applying a permutation
                 # which is the first step in the DCT.
                 if CUDAnative.ffs(k) == 1  # isodd(k)
-                    @inbounds RHS[i, j, convert(UInt32, CUDAnative.floor(k/2) + 1)] = div_f2c(grid, Gu, Gv, Gw, i, j, k)
+                    @inbounds RHS[i, j, convert(UInt32, CUDAnative.floor(k/2) + 1)] = div_f2c(grid, u, v, w, i, j, k) + Δt*div_f2c(grid, Gu, Gv, Gw, i, j, k)
                 else
-                    @inbounds RHS[i, j, convert(UInt32, Nz - CUDAnative.floor((k-1)/2))] = div_f2c(grid, Gu, Gv, Gw, i, j, k)
+                    @inbounds RHS[i, j, convert(UInt32, Nz - CUDAnative.floor((k-1)/2))] = div_f2c(grid, u, v, w, i, j, k) + Δt*div_f2c(grid, Gu, Gv, Gw, i, j, k)
                 end
             end
         end
@@ -254,7 +255,6 @@ function update_velocities_and_tracers!(grid::Grid, u, v, w, T, S, pNHS, Gu, Gv,
             @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
                 @inbounds u[i, j, k] = u[i, j, k] + (Gu[i, j, k] - (δx_c2f(grid, pNHS, i, j, k) / grid.Δx)) * Δt
                 @inbounds v[i, j, k] = v[i, j, k] + (Gv[i, j, k] - (δy_c2f(grid, pNHS, i, j, k) / grid.Δy)) * Δt
-                @inbounds w[i, j, k] = w[i, j, k] + (Gw[i, j, k] - (δz_c2f(grid, pNHS, i, j, k) / grid.Δz)) * Δt
                 @inbounds T[i, j, k] = T[i, j, k] + (GT[i, j, k] * Δt)
                 @inbounds S[i, j, k] = S[i, j, k] + (GS[i, j, k] * Δt)
             end
@@ -264,6 +264,21 @@ function update_velocities_and_tracers!(grid::Grid, u, v, w, T, S, pNHS, Gu, Gv,
     @synchronize
 end
 
+@inline ∇h_u(i, j, k, grid, u, v) = δx_f2c(grid, u, i, j, k) / grid.Δx + δy_f2c(grid, v, i, j, k) / grid.Δy
+
+"Compute the vertical velocity w from the continuity equation."
+function compute_w_from_continuity!(grid::Grid, u, v, w)
+    @loop for j in (1:grid.Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
+        @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
+            @inbounds w[i, j, 1] = 0
+            @unroll for k in 2:grid.Nz
+                @inbounds w[i, j, k] = w[i, j, k-1] + grid.Δz * ∇h_u(i, j, k-1, grid, u, v)
+            end
+        end
+    end
+
+    @synchronize
+end
 
 #
 # Boundary condition physics specification

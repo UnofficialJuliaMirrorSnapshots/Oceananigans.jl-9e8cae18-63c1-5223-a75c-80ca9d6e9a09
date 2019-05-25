@@ -94,7 +94,10 @@ export
     Nusselt_Chi,
 
     # Package utilities
-    prettytime
+    prettytime,
+
+    # Turbulence closures
+    TurbulenceClosures
 
 # Standard library modules
 using
@@ -143,13 +146,15 @@ end
 abstract type Metadata end
 abstract type ConstantsCollection end
 abstract type EquationOfState end
-abstract type Grid end
+abstract type Grid{T} end
 abstract type Field end
 abstract type FaceField <: Field end
 abstract type FieldSet end
 abstract type OutputWriter end
 abstract type Diagnostic end
 abstract type AbstractPoissonSolver end
+
+include("utils.jl")
 
 include("model_configuration.jl")
 include("clock.jl")
@@ -161,6 +166,8 @@ include("forcing.jl")
 
 include("operators/operators.jl")
 
+include("closures/turbulence_closures.jl")
+
 include("boundary_conditions.jl")
 include("equation_of_state.jl")
 include("poisson_solvers.jl")
@@ -169,7 +176,5 @@ include("time_steppers.jl")
 
 include("output_writers.jl")
 include("diagnostics.jl")
-
-include("utils.jl")
 
 end # module

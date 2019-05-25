@@ -1,14 +1,15 @@
-using Test
+using
+    Test,
+    Oceananigans,
+    Oceananigans.Operators,
+    Oceananigans.TurbulenceClosures
 
 import FFTW
 
-using Oceananigans
-using Oceananigans.Operators
+archs = (CPU(),)
+@hascuda archs = (CPU(), GPU())
 
-archs = [CPU()]
-@hascuda archs = [CPU(), GPU()]
-
-float_types = [Float32, Float64]
+float_types = (Float32, Float64)
 
 @testset "Oceananigans" begin
     println("Testing Oceananigans...")
@@ -243,9 +244,15 @@ float_types = [Float32, Float64]
             end
         end
 
+        @testset "Recomputing w from continuity" begin
+            for ft in float_types
+                test_compute_w_from_continuity(CPU(), ft)
+            end
+        end
+
         @testset "Incompressibility" begin
-            for Nt in [1, 10, 100]
-                @test incompressible_in_time(CPU(), Float64, Nt)
+            for ft in float_types, Nt in [1, 10, 100]
+                @test incompressible_in_time(CPU(), ft, Nt)
             end
         end
     end
@@ -264,9 +271,6 @@ float_types = [Float32, Float64]
                 end
             end
 
-            @test test_diffusion_simple(fld)
-            @test test_diffusion_budget(fld)
-            @test test_diffusion_cosine(fld)
             @test test_flux_budget(fld)
         end
     end
@@ -312,6 +316,40 @@ float_types = [Float32, Float64]
 
         @testset "Deep convection" begin
             run_deep_convection_golden_master_tests()
+        end
+    end
+
+    @testset "Dynamics tests" begin
+        println("  Testing dynamics...")
+        include("test_dynamics.jl")
+        @test internal_wave_test()
+        @test passive_tracer_advection_test()
+
+        for fld in (:u, :v, :T, :S)
+            @test test_diffusion_simple(fld)
+            @test test_diffusion_budget(fld)
+            @test test_diffusion_cosine(fld)
+        end
+    end
+
+    @testset "Turbulence closures tests" begin
+        println("  Testing turbulence closures...")
+        include("test_turbulence_closures.jl")
+        @test test_function_interpolation()
+        @test test_function_differentiation()
+
+        for T in float_types
+            for closure in (:ConstantIsotropicDiffusivity, :ConstantAnisotropicDiffusivity,
+                            :ConstantSmagorinsky)
+                @test test_closure_instantiation(T, closure)
+            end
+
+            @test test_constant_isotropic_diffusivity_basic(T)
+            @test test_constant_isotropic_diffusivity_fluxdiv(T)
+            @test test_anisotropic_diffusivity_fluxdiv(T, νv=zero(T), νh=zero(T))
+            @test test_anisotropic_diffusivity_fluxdiv(T)
+
+            @test test_smag_divflux_finiteness(T)
         end
     end
 end # Oceananigans tests
