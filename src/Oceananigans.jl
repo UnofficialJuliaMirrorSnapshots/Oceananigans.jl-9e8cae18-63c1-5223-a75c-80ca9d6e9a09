@@ -33,7 +33,9 @@ export
     FaceFieldZ,
     EdgeField,
     data,
+    underlying_data,
     set!,
+    fill_halo_regions!,
 
     # FieldSets (collections of related fields)
     FieldSet,
@@ -94,8 +96,6 @@ export
     FieldSummary,
     NaNChecker,
     VelocityDivergenceChecker,
-    Nusselt_wT,
-    Nusselt_Chi,
 
     # Package utilities
     prettytime,
@@ -150,7 +150,7 @@ device(::GPU) = GPUifyLoops.CUDA()
     end
 end
 
-# @hascuda CuArrays.allowscalar(false)
+@hascuda CuArrays.allowscalar(false)
 
 abstract type Metadata end
 abstract type ConstantsCollection end
