@@ -37,7 +37,7 @@ Our goal is to develop friendly and intuitive code allowing users to focus on th
 * [John Marshall](http://oceans.mit.edu/JohnMarshall/) ([@johncmarshall54](https://github.com/johncmarshall54))
 * [Greg Wagner](https://glwagner.github.io/) ([@glwagner](https://github.com/glwagner))
 * Andre Souza ([@sandreza](https://github.com/sandreza))
-* [James Schloss](http://leios.github.io/) ([@leios](https://github.com/leios/simuleios))
+* [James Schloss](http://leios.github.io/) ([@leios](https://github.com/leios))
 * [Mukund Gupta](https://mukund-gupta.github.io/) ([@mukund-gupta](https://github.com/mukund-gupta))
 * Zhen Wu ([@zhenwu0728](https://github.com/zhenwu0728))
 * On the Julia side, big thanks to Valentin Churavy ([@vchuravy](https://github.com/vchuravy)), Tim Besard ([@maleadt](https://github.com/maleadt)) and Peter Ahrens ([@peterahrens](https://github.com/peterahrens))!
@@ -125,7 +125,7 @@ model = Model(N=(Nx, Ny, Nz), L=(Lx, Ly, Lz), arch=GPU(), ν=4e-2, κ=4e-2)
 # Get location of the cell centers in x, y, z and reshape them to easily
 # broadcast over them when calculating hot_bubble_perturbation.
 xC, yC, zC = model.grid.xC, model.grid.yC, model.grid.zC
-xC, yC, zC = reshape(xC, (Nx, 1, 1)), reshape(yC, (Ny, 1, 1)), reshape(zC, (1, 1, Nz))
+xC, yC, zC = reshape(xC, (Nx, 1, 1)), reshape(yC, (1, Ny, 1)), reshape(zC, (1, 1, Nz))
 
 # Set a temperature perturbation with a Gaussian profile located at the center
 # of the vertical slice. It roughly corresponds to a background temperature of
@@ -144,9 +144,12 @@ time_step!(model, Nt, Δt)
 
 **Warning**: Until issue [#64](https://github.com/climate-machine/Oceananigans.jl/issues/64) is resolved, you can only run GPU models with grid sizes where `Nx` and `Ny` are multiples of 16.
 
-To see a more advanced example, see [`free_convection.jl`](https://github.com/climate-machine/Oceananigans.jl/blob/master/examples/free_convection.jl), which should be decently commented and comes with command line arguments to configure the simulation.
+GPU model output can be plotted on-the-fly and animated using [Makie.jl](https://github.com/JuliaPlots/Makie.jl)! This [NextJournal notebook](https://nextjournal.com/sdanisch/oceananigans) has an example. Thanks [@SimonDanisch](https://github.com/SimonDanisch)! Some Makie.jl isosurfaces from a rising spherical thermal bubble (the GPU example):
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ali-ramadhan/ali-ramadhan.Github.io/master/img/Rising%20spherical%20thermal%20bubble%20Makie.png">
+</p>
 
-You can movie output from GPU simulations below along with CPU and GPU [performance benchmarks](https://github.com/climate-machine/Oceananigans.jl#performance-benchmarks).
+You can see some movies from GPU simulations below along with CPU and GPU [performance benchmarks](https://github.com/climate-machine/Oceananigans.jl#performance-benchmarks).
 
 ## Getting help
 If you are interested in using Oceananigans.jl or are trying to figure out how to use it, please feel free to ask us questions and get in touch! Check out the [examples](https://github.com/climate-machine/Oceananigans.jl/tree/master/examples) and [open an issue](https://github.com/climate-machine/Oceananigans.jl/issues/new) if you have any questions, comments, suggestions, etc.
