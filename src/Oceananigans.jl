@@ -21,6 +21,9 @@ export
     EarthStationary,
     Europa,
     Enceladus,
+    minute,
+    hour,
+    day,
 
     # Grids
     Grid,
@@ -71,7 +74,7 @@ export
     FieldBoundaryConditions,
     ModelBoundaryConditions,
     BoundaryConditions,
-    DoublyPeriodicBCs,
+    HorizontallyPeriodicBCs,
     ChannelBCs,
     getbc,
     setbc!,
@@ -105,6 +108,7 @@ export
     OutputWriter,
     BinaryOutputWriter,
     NetCDFOutputWriter,
+    JLD2OutputWriter,
     write_output,
     read_output,
 
@@ -129,7 +133,8 @@ export
 using
     Statistics,
     LinearAlgebra,
-    Printf
+    Printf,
+    FileIO
 
 # Third-party modules
 using
@@ -137,7 +142,7 @@ using
     FFTW,
     StaticArrays,
     OffsetArrays,
-    JLD,
+    JLD2,
     NetCDF
 
 import
@@ -196,8 +201,6 @@ include("clock.jl")
 include("planetary_constants.jl")
 include("grids.jl")
 include("fields.jl")
-include("fieldsets.jl")
-include("forcing.jl")
 
 include("operators/operators.jl")
 include("turbulence_closures/TurbulenceClosures.jl")

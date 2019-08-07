@@ -75,3 +75,5 @@ function run_diagnostic(model::Model, diag::VelocityDivergenceChecker)
         exit(1)
     end
 end
+
+time_to_run(clock, diag) = (clock.iteration % diag.diagnostic_frequency) == 0

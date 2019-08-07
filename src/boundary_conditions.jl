@@ -1,5 +1,7 @@
 import GPUifyLoops: @launch, @loop, @unroll
 
+using Oceananigans.TurbulenceClosures
+
 const coordinates = (:x, :y, :z)
 const dims = length(coordinates)
 const solution_fields = (:u, :v, :w, :T, :S)
@@ -54,6 +56,10 @@ function CoordinateBoundaryConditions(;
    )
     return CoordinateBoundaryConditions(left, right)
 end
+
+PeriodicBoundaryConditions() =
+    CoordinateBoundaryConditions(BoundaryCondition(Periodic, nothing),
+                                 BoundaryCondition(Periodic, nothing))
 
 """
     ZBoundaryConditions(top=BoundaryCondition(Periodic, nothing),
@@ -110,30 +116,27 @@ function FieldBoundaryConditions(;
     return FieldBoundaryConditions(x, y, z)
 end
 
+function HorizontallyPeriodicBCs(;    top = BoundaryCondition(Flux, 0),
+                                   bottom = BoundaryCondition(Flux, 0)
+                                )
 
-function DoublyPeriodicBCs(;  x = CoordinateBoundaryConditions(
-                                    BoundaryCondition(Periodic, nothing),
-                                    BoundaryCondition(Periodic, nothing)),
-                              y = CoordinateBoundaryConditions(
-                                    BoundaryCondition(Periodic, nothing),
-                                    BoundaryCondition(Periodic, nothing)),
-                              z = CoordinateBoundaryConditions(
-                                    BoundaryCondition(Flux, 0),
-                                    BoundaryCondition(Flux, 0))
-                            )
+    x = PeriodicBoundaryConditions()
+    y = PeriodicBoundaryConditions()
+    z = CoordinateBoundaryConditions(top, bottom)
+
     return FieldBoundaryConditions(x, y, z)
 end
 
-function ChannelBCs(; x = CoordinateBoundaryConditions(
-                            BoundaryCondition(Periodic, nothing),
-                            BoundaryCondition(Periodic, nothing)),
-                      y = CoordinateBoundaryConditions(
-                            BoundaryCondition(Flux, 0),
-                            BoundaryCondition(Flux, 0)),
-                      z = CoordinateBoundaryConditions(
-                            BoundaryCondition(Flux, 0),
-                            BoundaryCondition(Flux, 0))
+function ChannelBCs(;  north = BoundaryCondition(Flux, 0),
+                       south = BoundaryCondition(Flux, 0),
+                         top = BoundaryCondition(Flux, 0),
+                      bottom = BoundaryCondition(Flux, 0)
                     )
+
+    x = PeriodicBoundaryConditions()
+    y = CoordinateBoundaryConditions(south, north)
+    z = CoordinateBoundaryConditions(top, bottom)
+
     return FieldBoundaryConditions(x, y, z)
 end
 
@@ -154,11 +157,11 @@ const BoundaryConditions = ModelBoundaryConditions
 Returns model boundary conditions for `u`, `v`, `w`, `T`, and `S`.
 """
 function ModelBoundaryConditions(;
-    u = DoublyPeriodicBCs(),
-    v = DoublyPeriodicBCs(),
-    w = DoublyPeriodicBCs(),
-    T = DoublyPeriodicBCs(),
-    S = DoublyPeriodicBCs()
+    u = HorizontallyPeriodicBCs(),
+    v = HorizontallyPeriodicBCs(),
+    w = HorizontallyPeriodicBCs(),
+    T = HorizontallyPeriodicBCs(),
+    S = HorizontallyPeriodicBCs()
    )
     return ModelBoundaryConditions(u, v, w, T, S)
 end
@@ -261,7 +264,7 @@ If `top_bc.condition` is a function, the function must have the signature
     Gc[i, j, 1] += κ * getbc(top_gradient, i, j, grid, t, iteration, U, Φ) / grid.Δz
 
 @inline apply_z_top_bc!(top_value::BC{<:Value}, i, j, grid, c, Gc, κ, t, iteration, U, Φ) =
-    Gc[i, j, 1] += 2κ / grid.Δz * (getbc(top_value, i, j, grid, t, iteration, U, Φ) - c[i, j, 1])
+    Gc[i, j, 1] += 2κ / grid.Δz^2 * (getbc(top_value, i, j, grid, t, iteration, U, Φ) - c[i, j, 1])
 
 """
     apply_z_bottom_bc!(bottom_bc, i, j, grid, c, Gc, κ, t, iteration, U, Φ)
@@ -280,7 +283,7 @@ If `bottom_bc.condition` is a function, the function must have the signature
     Gc[i, j, grid.Nz] -= κ * getbc(bottom_gradient, i, j, grid, t, iteration, U, Φ) / grid.Δz
 
 @inline apply_z_bottom_bc!(bottom_value::BC{<:Value}, i, j, grid, c, Gc, κ, t, iteration, U, Φ) =
-    Gc[i, j, grid.Nz] -= 2κ / grid.Δz * (c[i, j, grid.Nz] - getbc(bottom_value, i, j, grid, t, iteration, U, Φ))
+    Gc[i, j, grid.Nz] -= 2κ / grid.Δz^2 * (c[i, j, grid.Nz] - getbc(bottom_value, i, j, grid, t, iteration, U, Φ))
 
 # Do nothing if both left and right boundary conditions are periodic.
 apply_bcs!(::CPU, ::Val{:x}, Bx, By, Bz,
@@ -305,11 +308,15 @@ apply_bcs!(arch, ::Val{:y}, Bx, By, Bz, args...) =
 apply_bcs!(arch, ::Val{:z}, Bx, By, Bz, args...) =
     @launch device(arch) threads=(Tx, Ty) blocks=(Bx, By) apply_z_bcs!(args...)
 
-get_top_κ(κ::Number, args...) = κ
-get_bottom_κ(κ::Number, args...) = κ
+@inline get_top_κ(κ::Number, args...) = κ
+@inline get_bottom_κ(κ::Number, args...) = κ
 
-get_top_κ(κ::AbstractArray, i, j, args...) = κ[i, j, 1]
-get_bottom_κ(κ::AbstractArray, i, j, grid, args...) = κ[i, j, grid.Nz]
+@inline get_top_κ(κ::AbstractArray, i, j, args...) = κ[i, j, 1]
+@inline get_bottom_κ(κ::AbstractArray, i, j, grid, args...) = κ[i, j, grid.Nz]
+
+# ConstantSmagorinsky does not compute or store κ so we will compute κ = ν / Pr.
+@inline get_top_κ(ν::AbstractArray, i, j, grid, closure::ConstantSmagorinsky, args...) = ν[i, j, 1] / closure.Pr
+@inline get_bottom_κ(ν::AbstractArray, i, j, grid, closure::ConstantSmagorinsky, args...) = ν[i, j, grid.Nz] / closure.Pr
 
 """
     apply_z_bcs!(top_bc, bottom_bc, grid, c, Gc, κ, closure, eos, g, t, iteration, U, Φ)
@@ -321,13 +328,11 @@ the boundary condition will be applied Bz times!
 function apply_z_bcs!(top_bc, bottom_bc, grid, c, Gc, κ, closure, eos, g, t, iteration, U, Φ)
     @loop for j in (1:grid.Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
         @loop for i in (1:grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
-
             κ_top = get_top_κ(κ, i, j, grid, closure, eos, g, U, Φ)
             κ_bottom = get_bottom_κ(κ, i, j, grid, closure, eos, g, U, Φ)
 
                apply_z_top_bc!(top_bc,    i, j, grid, c, Gc, κ_top, t, iteration, U, Φ)
             apply_z_bottom_bc!(bottom_bc, i, j, grid, c, Gc, κ_bottom, t, iteration, U, Φ)
-
         end
     end
 end
