@@ -1,7 +1,8 @@
 using .TurbulenceClosures
 
-mutable struct Model{A<:Architecture, GR, T, EOS<:EquationOfState, PC<:PlanetaryConstants, 
-                     VC, TR, PF, F, TC, BCS<:ModelBoundaryConditions, TS, PS, D}
+mutable struct Model{A<:Architecture, GR, T, EOS<:EquationOfState,
+                     PC<:PlanetaryConstants,
+                     VC, TR, PF, F, TC, BCS, TS, PS, D} <: AbstractModel
 
               arch :: A                      # Computer `Architecture` on which `Model` is run
               grid :: GR                     # Grid of physical points on which `Model` is solved
@@ -49,7 +50,7 @@ function Model(;
            eos = LinearEquationOfState(float_type),
     # Forcing and boundary conditions for (u, v, w, T, S)
        forcing = Forcing(),
-           bcs = ModelBoundaryConditions(),
+           bcs = HorizontallyPeriodicModelBCs(),
     boundary_conditions = bcs,
     # Output and diagonstics
     output_writers = OutputWriter[],
@@ -72,8 +73,8 @@ function Model(;
     # Set the default initial condition
     initialize_with_defaults!(eos, tracers)
 
-    Model(arch, grid, clock, eos, constants, velocities, tracers, 
-          pressures, forcing, closure, boundary_conditions, timestepper, 
+    Model(arch, grid, clock, eos, constants, velocities, tracers,
+          pressures, forcing, closure, boundary_conditions, timestepper,
           poisson_solver, diffusivities, output_writers, diagnostics)
 end
 
@@ -85,34 +86,44 @@ end
 
     kwargs are passed to the regular `Model` constructor.
 """
-ChannelModel(; bcs=ChannelModelBoundaryConditions(), kwargs...) = 
+ChannelModel(; bcs=ChannelModelBCs(), kwargs...) =
     Model(; bcs=bcs, kwargs...)
-          
+
+#
+# Model initialization utilities
+#
+
 arch(model::Model{A}) where A <: Architecture = A
 float_type(m::Model) = eltype(model.grid)
 add_bcs!(model::Model; kwargs...) = add_bcs(model.boundary_conditions; kwargs...)
 
-function initialize_with_defaults!(eos, tracers, sets...)
+
+function initialize_with_defaults!(eos::EquationOfState, tracers, sets...)
     # Default tracer initial condition is deteremined by eos.
     tracers.S.data.parent .= eos.S₀
     tracers.T.data.parent .= eos.T₀
+    initialize_with_zeros!(sets...)
+    return nothing
+end
 
-    # Set all further fields to 0
+function initialize_with_zeros!(sets...)
+    # Set all fields to 0
     for set in sets
         for fldname in propertynames(set)
             fld = getproperty(set, fldname)
             fld.data.parent .= 0 # promotes to eltype of fld.data
         end
     end
+    return nothing
 end
 
 """
     Forcing(; kwargs...)
 
-Return a named tuple of forcing functions 
+Return a named tuple of forcing functions
 for each solution field.
 """
-Forcing(; Fu=zerofunk, Fv=zerofunk, Fw=zerofunk, FT=zerofunk, FS=zerofunk) = 
+Forcing(; Fu=zerofunk, Fv=zerofunk, Fw=zerofunk, FT=zerofunk, FS=zerofunk) =
     (u=Fu, v=Fv, w=Fw, T=FT, S=FS)
 
 """
@@ -156,7 +167,7 @@ end
     Tendencies(arch, grid)
 
 Return a NamedTuple with tendencies for all solution fields
-(velocity fields and tracer fields), initialized on 
+(velocity fields and tracer fields), initialized on
 the architecture `arch` and `grid`.
 """
 function Tendencies(arch, grid)

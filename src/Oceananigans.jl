@@ -59,6 +59,7 @@ export
     Forcing,
 
     # Equation of state
+    NoEquationOfState,
     LinearEquationOfState,
     δρ,
     buoyancy,
@@ -76,6 +77,8 @@ export
     BoundaryConditions,
     HorizontallyPeriodicBCs,
     ChannelBCs,
+    HorizontallyPeriodicModelBCs,
+    ChannelModelBCs,
     getbc,
     setbc!,
 
@@ -148,13 +151,10 @@ using
 import
     GPUifyLoops
 
-# Adapt an offset CuArray to work nicely with CUDA kernels.
-Adapt.adapt_structure(to, x::OffsetArray) = OffsetArray(adapt(to, parent(x)), x.offsets)
-
-# Need to adapt SubArray indices as well.
-# See: https://github.com/JuliaGPU/Adapt.jl/issues/16
-Adapt.adapt_structure(to, A::SubArray{<:Any,<:Any,AT}) where {AT} =
-    SubArray(adapt(to, parent(A)), adapt.(Ref(to), parentindices(A)))
+import Base:
+    size, length,
+    getindex, lastindex, setindex!,
+    iterate, similar, *, +, -
 
 # Import CUDA utilities if cuda is detected.
 const HAVE_CUDA = try
@@ -164,16 +164,11 @@ catch
     false
 end
 
+import GPUifyLoops: @launch, @loop, @unroll
+
 macro hascuda(ex)
     return HAVE_CUDA ? :($(esc(ex))) : :(nothing)
 end
-
-abstract type Architecture end
-struct CPU <: Architecture end
-struct GPU <: Architecture end
-
-device(::CPU) = GPUifyLoops.CPU()
-device(::GPU) = GPUifyLoops.CUDA()
 
 @hascuda begin
     println("CUDA-enabled GPU(s) detected:")
@@ -184,13 +179,19 @@ end
 
 @hascuda CuArrays.allowscalar(false)
 
-abstract type Metadata end
+abstract type Architecture end
+struct CPU <: Architecture end
+struct GPU <: Architecture end
+
+device(::CPU) = GPUifyLoops.CPU()
+device(::GPU) = GPUifyLoops.CUDA()
+
 abstract type ConstantsCollection end
 abstract type EquationOfState end
 abstract type Grid{T} end
-abstract type Field end
-abstract type FaceField <: Field end
-abstract type FieldSet end
+abstract type AbstractModel end
+abstract type Field{A, G} end
+abstract type FaceField{A, G} <: Field{A, G} end
 abstract type OutputWriter end
 abstract type Diagnostic end
 abstract type PoissonSolver end
