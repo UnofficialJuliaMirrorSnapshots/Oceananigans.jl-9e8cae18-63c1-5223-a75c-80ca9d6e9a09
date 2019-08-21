@@ -70,6 +70,8 @@ export
     Flux,
     Gradient,
     Value,
+    Dirchlet,
+    Neumann,
     CoordinateBoundaryConditions,
     ZBoundaryConditions,
     FieldBoundaryConditions,
@@ -124,6 +126,9 @@ export
 
     # Package utilities
     prettytime,
+    pretty_filesize,
+    KB, MB, GB, TB,
+    KiB, MiB, GiB, TiB,
 
     # Turbulence closures
     TurbulenceClosures,
@@ -136,8 +141,7 @@ export
 using
     Statistics,
     LinearAlgebra,
-    Printf,
-    FileIO
+    Printf
 
 # Third-party modules
 using
