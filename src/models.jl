@@ -1,8 +1,8 @@
 using .TurbulenceClosures
 
-mutable struct Model{A<:Architecture, GR, T, EOS<:EquationOfState,
+mutable struct Model{TS, TC, A<:Architecture, GR, T, EOS<:EquationOfState,
                      PC<:PlanetaryConstants,
-                     VC, TR, PF, F, TC, BCS, TS, PS, D} <: AbstractModel
+                     VC, TR, PF, F, BCS, PS, D} <: AbstractModel
 
               arch :: A                      # Computer `Architecture` on which `Model` is run
               grid :: GR                     # Grid of physical points on which `Model` is solved
@@ -57,7 +57,7 @@ function Model(;
        diagnostics = Diagnostic[]
     )
 
-    arch == GPU() && !HAVE_CUDA && throw(
+    arch == GPU() && !has_cuda() && throw(
         ArgumentError("Cannot create a GPU model. No CUDA-enabled GPU was detected!"))
 
     # Initialize fields.

@@ -1,49 +1,9 @@
-using Statistics: mean, std
+using Statistics: mean
 using Printf
 
-struct CFLChecker <: Diagnostic end
-
-struct FieldSummary <: Diagnostic
-    diagnostic_frequency::Int
-    fields::Array{Field,1}
-    field_names::Array{AbstractString,1}
-end
-
-function run_diagnostic(model::Model, fs::FieldSummary)
-    for (field, field_name) in zip(fs.fields, fs.field_names)
-        padded_name = lpad(field_name, 4)
-        field_min = minimum(field.data)
-        field_max = maximum(field.data)
-        field_mean = mean(field.data)
-        field_abs_mean = mean(abs.(field.data))
-        field_std = std(field.data)
-        @printf("%s: min=%.6g, max=%.6g, mean=%.6g, absmean=%.6g, std=%.6g\n",
-                padded_name, field_min, field_max, field_mean, field_abs_mean, field_std)
-    end
-end
-
-struct NaNChecker <: Diagnostic
-    diagnostic_frequency::Int
-    fields::Array{Field,1}
-    field_names::Array{AbstractString,1}
-end
-
-function run_diagnostic(model::Model, nc::NaNChecker)
-    for (field, field_name) in zip(nc.fields, nc.field_names)
-        if any(isnan, field.data.parent)  # This is also fast on CuArrays.
-            t, i = model.clock.time, model.clock.iteration
-            println("time = $t, iteration = $i")
-            println("NaN found in $field_name. Aborting simulation.")
-            exit(1)
-        end
-    end
-end
-
-struct VelocityDivergenceChecker <: Diagnostic
-    diagnostic_frequency::Int
-    warn_threshold::Float64
-    abort_threshold::Float64
-end
+####
+#### Useful kernels
+####
 
 function velocity_div!(grid::RegularCartesianGrid, u, v, w, div)
     @loop for k in (1:grid.Nz; (blockIdx().z - 1) * blockDim().z + threadIdx().z)
@@ -55,25 +15,90 @@ function velocity_div!(grid::RegularCartesianGrid, u, v, w, div)
     end
 end
 
-function run_diagnostic(model::Model, diag::VelocityDivergenceChecker)
-    u, v, w = model.velocities.u.data, model.velocities.v.data, model.velocities.w.data
-    div = model.stepper_tmp.fC1
+####
+#### Horizontally averaged vertical profiles
+####
 
-    velocity_div!(model.grid, u, v, w, div)
-    min_div, mean_div, max_div = minimum(div), mean(div), maximum(div)
-
-    if max(abs(min_div), abs(max_div)) >= diag.warn_threshold
-        t, i = model.clock.time, model.clock.iteration
-        println("time = $t, iteration = $i")
-        println("WARNING: Velocity divergence is high! min=$min_div, mean=$mean_div, max=$max_div")
-    end
-
-    if max(abs(min_div), abs(max_div)) >= diag.abort_threshold
-        t, i = model.clock.time, model.clock.iteration
-        println("time = $t, iteration = $i")
-        println("Velocity divergence is too high! min=$min_div, mean=$mean_div, max=$max_div. Aborting simulation.")
-        exit(1)
-    end
+mutable struct HorizontalAverage{F, RT, P, I, T} <: Diagnostic
+        profile :: P
+         fields :: F
+      frequency :: I
+       interval :: T
+       previous :: Float64
+    return_type :: RT
 end
 
-time_to_run(clock, diag) = (clock.iteration % diag.diagnostic_frequency) == 0
+
+function HorizontalAverage(model, fields; frequency=nothing, interval=nothing,
+                           return_type=nothing)
+    fields = parenttuple(tupleit(fields))
+    validate_interval(frequency, interval)
+    profile = zeros(model.arch, model.grid, 1, 1, model.grid.Tz)
+    return HorizontalAverage(profile, fields, frequency, interval, 0.0, return_type)
+end
+
+"Normalize a horizontal sum to get the horizontal average."
+normalize_horizontal_sum!(hsum, grid) = hsum.profile /= (grid.Nx * grid.Ny)
+
+"""
+    run_diagnostic(model, havg)
+
+Compute the horizontal average of `havg.fields` and store the
+result in `havg.profile`. If length(fields) > 1, compute the
+product of the elements of fields (without taking into account
+the possibility that they may have different locations in the
+staggered grid) before computing the horizontal average.
+"""
+function run_diagnostic(model::Model, havg::HorizontalAverage{NTuple{1}})
+    zero_halo_regions!(havg.fields[1], model.grid)
+    sum!(havg.profile, havg.fields[1])
+    normalize_horizontal_sum!(havg, model.grid)
+    return
+end
+
+function run_diagnostic(model::Model, havg::HorizontalAverage)
+    zero_halo_regions!(havg.fields, model.grid)
+
+    # Use pressure as scratch space for the product of fields.
+    tmp = model.pressures.pNHS.data.parent
+    zero_halo_regions!(tmp, model.grid)
+
+    @. tmp = *(havg.fields...)
+    sum!(havg.profile, tmp)
+    normalize_horizontal_sum!(havg, model.grid)
+
+    return
+end
+
+function (havg::HorizontalAverage{F, Nothing})(model) where F
+    run_diagnostic(model, havg)
+    return p.profile
+end
+
+function (havg::HorizontalAverage)(model)
+    run_diagnostic(model, havg)
+    return return_type(havg.profile)
+end
+
+
+####
+#### NaN checker
+####
+
+struct NaNChecker{D} <: Diagnostic
+    frequency :: Int
+       fields :: D
+end
+
+function NaNChecker(model; frequency=1000, fields=Dict(:w => model.velocities.w.data.parent))
+    NaNChecker(frequency, fields)
+end
+
+function run_diagnostic(model::Model, nc::NaNChecker)
+    for (name, field) in nc.fields
+        if any(isnan, field)
+            t, i = model.clock.time, model.clock.iteration
+            error("time = $t, iteration = $i: NaN found in $name. Aborting simulation.")
+        end
+    end
+end

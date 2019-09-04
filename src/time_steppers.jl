@@ -12,8 +12,8 @@ method with step size `Δt`.
 function time_step!(model, Nt, Δt; init_with_euler=true)
 
     if model.clock.iteration == 0
-        [ write_output(model, out)    for out  in model.output_writers ]
         [ run_diagnostic(model, diag) for diag in model.diagnostics ]
+        [ write_output(model, out)    for out  in model.output_writers ]
     end
 
     FT = eltype(model.grid)
@@ -28,7 +28,7 @@ function time_step!(model, Nt, Δt; init_with_euler=true)
                    model.forcing, model.boundary_conditions, U, Φ, p, K, RHS, Gⁿ, G⁻, Δt, χ)
 
         [ time_to_run(model.clock, diag) && run_diagnostic(model, diag) for diag in model.diagnostics ]
-        [ time_to_write(model.clock, out) && write_output(model, out) for out in model.output_writers ]
+        [ time_to_run(model.clock, out) && write_output(model, out) for out in model.output_writers ]
     end
 
     return nothing
@@ -41,28 +41,34 @@ Step forward one time step.
 """
 function time_step!(model, arch, grid, constants, eos, closure, forcing, bcs, U, Φ, p, K, RHS, Gⁿ, G⁻, Δt, χ)
 
+    # Pre-computations:
     @launch device(arch) config=launch_config(grid, 3) store_previous_source_terms!(grid, Gⁿ, G⁻)
-    @launch device(arch) config=launch_config(grid, 2) update_hydrostatic_pressure!(p.pHY′, grid, constants, eos, Φ)
-    @launch device(arch) config=launch_config(grid, 3) calc_diffusivities!(K, grid, closure, eos, constants.g, U, Φ)
-
     fill_halo_regions!(merge(U, Φ), bcs, grid)
-    fill_halo_regions!(p.pHY′, bcs[4], grid)
+
+    @launch device(arch) config=launch_config(grid, 3) calc_diffusivities!(K, grid, closure, eos, constants.g, U, Φ)
+    fill_halo_regions!(K, bcs[4], grid) # fill diffusivity halo regions with same conditions as temperature
+    @launch device(arch) config=launch_config(grid, 2) update_hydrostatic_pressure!(p.pHY′, grid, constants, eos, Φ)
+    fill_halo_regions!(p.pHY′, bcs[4], grid) # fill pressure halo regions with same conditions as temperature
+
+    # Calc RHS:
     calculate_interior_source_terms!(arch, grid, constants, eos, closure, U, Φ, p.pHY′, Gⁿ, K, forcing)
     calculate_boundary_source_terms!(arch, grid, bcs, model.clock, closure, U, Φ, Gⁿ, K)
 
+    # Complete explicit substep:
     @launch device(arch) config=launch_config(grid, 3) adams_bashforth_update_source_terms!(grid, Gⁿ, G⁻, χ)
 
+    # Start pressure correction substep with a pressure solve:
     fill_halo_regions!(Gⁿ[1:3], bcs[1:3], grid)
-
     @launch device(arch) config=launch_config(grid, 3) calculate_poisson_right_hand_side!(arch, grid, model.poisson_solver.bcs,
                                                                                           Δt, U, Gⁿ, RHS)
     solve_for_pressure!(arch, model)
     fill_halo_regions!(p.pNHS, bcs[4], grid)
 
+    # Complete pressure correction step:
     @launch device(arch) config=launch_config(grid, 3) update_velocities_and_tracers!(grid, U, Φ, p.pNHS, Gⁿ, Δt)
 
+    # Recompute vertical velocity w from continuity equation to ensure incompressibility
     fill_halo_regions!(U, bcs[1:3], grid)
-
     @launch device(arch) config=launch_config(grid, 2) compute_w_from_continuity!(grid, U)
 
     model.clock.time += Δt
@@ -331,14 +337,6 @@ get_κ(closure::IsotropicDiffusivity, K) = (T=closure.κ, S=closure.κ)
 get_ν(closure::ConstantAnisotropicDiffusivity, K) = closure.νv
 get_κ(closure::ConstantAnisotropicDiffusivity, K) = (T=closure.κv, S=closure.κv)
 
-# get_κ looks wrong here because κ = ν / Pr but ConstantSmagorinsky does not compute or store κ, so we pass κ = ν to
-# apply_bcs! which will compute κ correctly as it knows both ν and Pr.
-get_ν(closure::ConstantSmagorinsky, K) = K.νₑ
-get_κ(closure::ConstantSmagorinsky, K) = (T=K.νₑ, S=K.νₑ)
-
-get_ν(closure::AnisotropicMinimumDissipation, K) = K.νₑ
-get_κ(closure::AnisotropicMinimumDissipation, K) = (T=K.κₑ.T, S=K.κₑ.S)
-
 "Apply boundary conditions by modifying the source term G."
 function calculate_boundary_source_terms!(arch, grid, bcs, clock, closure, U, Φ, Gⁿ, K)
     Bx, By, Bz = floor(Int, grid.Nx/Tx), floor(Int, grid.Ny/Ty), grid.Nz  # Blocks in grid
@@ -351,14 +349,12 @@ function calculate_boundary_source_terms!(arch, grid, bcs, clock, closure, U, Φ
     for (i, ubcs) in enumerate(bcs[1:3])
         apply_bcs!(arch, Val(:z), Bx, By, Bz, ubcs.z.left, ubcs.z.right,
                    grid, U[i], Gⁿ[i], ν, closure, clock.time, clock.iteration, U, Φ)
-
     end
 
     # Tracer fields
     for (i, ϕbcs) in enumerate(bcs[4:end])
         apply_bcs!(arch, Val(:z), Bx, By, Bz, ϕbcs.z.left, ϕbcs.z.right,
                    grid, Φ[i], Gⁿ[i+3], κ[i], closure, clock.time, clock.iteration, U, Φ)
-
     end
 
     return nothing
