@@ -1,4 +1,4 @@
-struct RozemaAnisotropicMinimumDissipation{T} <: IsotropicDiffusivity{T}
+struct RozemaAnisotropicMinimumDissipation{T} <: AbstractAnisotropicMinimumDissipation{T}
      C :: T
     Cb :: T
      ν :: T
@@ -41,14 +41,14 @@ const Δx_ccf = Δx
 const Δy_ccf = Δy
 const Δz_ccf = Δz
 
-function TurbulentDiffusivities(arch::Architecture, grid::Grid, ::RAMD)
+function TurbulentDiffusivities(arch::AbstractArchitecture, grid::AbstractGrid, ::RAMD)
      νₑ = CellField(arch, grid)
     κTₑ = CellField(arch, grid)
     κSₑ = CellField(arch, grid)
     return (νₑ=νₑ, κₑ=(T=κTₑ, S=κSₑ))
 end
 
-@inline function ν_ccc(i, j, k, grid::Grid{FT}, closure::RAMD, c,
+@inline function ν_ccc(i, j, k, grid::AbstractGrid{FT}, closure::RAMD, c,
                        eos, grav, u, v, w, T, S) where FT
 
     q = tr_∇u_ccc(i, j, k, grid, u, v, w)
@@ -64,7 +64,7 @@ end
     return max(zero(FT), νˢᶠˢ) + closure.ν
 end
 
-@inline function ν_ccf(i, j, k, grid::Grid{FT}, closure::RAMD, c,
+@inline function ν_ccf(i, j, k, grid::AbstractGrid{FT}, closure::RAMD, c,
                        eos, grav, u, v, w, T, S) where FT
 
     q = tr_∇u_ccf(i, j, k, grid, u, v, w)
@@ -80,9 +80,9 @@ end
     return max(zero(FT), νˢᶠˢ) + closure.ν
 end
 
-@inline function κ_ccc(i, j, k, grid::Grid{FT}, closure::RAMD, c,
+@inline function κ_ccc(i, j, k, grid::AbstractGrid{FT}, closure::RAMD, c,
                        eos, grav, u, v, w, T, S) where FT
-    
+
     σ = θᵢ²_ccc(i, j, k, grid, c) # Tracer variance
 
     if σ == 0
@@ -95,9 +95,9 @@ end
     return max(zero(FT), κˢᶠˢ) + closure.κ
 end
 
-@inline function κ_ccf(i, j, k, grid::Grid{FT}, closure::RAMD, c,
+@inline function κ_ccf(i, j, k, grid::AbstractGrid{FT}, closure::RAMD, c,
                        eos, grav, u, v, w, T, S) where FT
-    
+
     σ = θᵢ²_ccf(i, j, k, grid, c) # Tracer variance
 
     if σ == 0
@@ -261,13 +261,13 @@ end
     Δz = Δz_ccc(ijk..., closure)
 
     Δx²_wx_bx = Δx^2 * (▶xz_cac(ijk..., ∂x_faa, w)
-                          * ▶x_caa(ijk..., ∂x_faa, buoyancy, eos, grav, T, S))
+                          * ▶x_caa(ijk..., ∂x_faa, buoyancy_perturbation, eos, grav, T, S))
 
     Δy²_wy_by = Δy^2 * (▶yz_acc(ijk..., ∂y_afa, w)
-                          * ▶y_aca(ijk..., ∂y_afa, buoyancy, eos, grav, T, S))
+                          * ▶y_aca(ijk..., ∂y_afa, buoyancy_perturbation, eos, grav, T, S))
 
     Δz²_wz_bz = Δz^2 * (∂z_aac(ijk..., w)
-                          * ▶z_aac(ijk..., ∂z_aaf, buoyancy, eos, grav, T, S))
+                          * ▶z_aac(ijk..., ∂z_aaf, buoyancy_perturbation, eos, grav, T, S))
 
     return Δx²_wx_bx + Δy²_wy_by + Δz²_wz_bz
 end
@@ -280,13 +280,13 @@ end
     Δz = Δz_ccf(ijk..., closure)
 
     Δx²_wx_bx = Δx^2 * (▶x_caa(ijk..., ∂x_faa, w)
-                          * ▶xz_caf(ijk..., ∂x_faa, buoyancy, eos, grav, T, S))
+                          * ▶xz_caf(ijk..., ∂x_faa, buoyancy_perturbation, eos, grav, T, S))
 
     Δy²_wy_by = Δy^2 * (▶y_aca(ijk..., ∂y_afa, w)
-                          * ▶yz_acf(ijk..., ∂y_afa, buoyancy, eos, grav, T, S))
+                          * ▶yz_acf(ijk..., ∂y_afa, buoyancy_perturbation, eos, grav, T, S))
 
     Δz²_wz_bz = Δz^2 * (▶z_aaf(ijk..., ∂z_aac, w)
-                          * ∂z_aaf(ijk..., buoyancy, eos, grav, T, S))
+                          * ∂z_aaf(ijk..., buoyancy_perturbation, eos, grav, T, S))
 
     return Δx²_wx_bx + Δy²_wy_by + Δz²_wz_bz
 end

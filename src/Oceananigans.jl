@@ -8,69 +8,59 @@ export
     # Helper macro for determining if a CUDA-enabled GPU is available.
     @hascuda,
 
-    Architecture, CPU, GPU, device,
+    # Architectures
+    CPU, GPU,
 
-    # Planetary Constants
-    PlanetaryConstants,
-    Earth, Europa, Enceladus,
+    # Constants
+    PlanetaryConstants, Earth, Europa, Enceladus,
     second, minute, hour, day,
 
     # Grids
-    Grid, RegularCartesianGrid,
+    RegularCartesianGrid,
 
     # Fields
-    Field, FaceField, CellField, FaceFieldX, FaceFieldY, FaceFieldZ,
-    data, ardata, ardata_view, underlying_data,
-    set!, set_ic!,
+    Field, CellField, FaceFieldX, FaceFieldY, FaceFieldZ,
+    data, set!, set_ic!,
     nodes, xnodes, ynodes, znodes,
 
-    # Constructors for NamedTuples of fields
-    VelocityFields, TracerFields, PressureFields,
-
-    # Constructor for a named tuple of forcing functions
+    # Forcing functions
     Forcing,
 
     # Equation of state
     NoEquationOfState, LinearEquationOfState,
-    δρ, buoyancy,
 
     # Boundary conditions
-    BoundaryCondition, Periodic, Flux, Gradient, Value, Dirchlet, Neumann,
-    CoordinateBoundaryConditions, FieldBoundaryConditions, ModelBoundaryConditions,
-    HorizontallyPeriodicBCs, ChannelBCs,
-    BoundaryConditions, HorizontallyPeriodicModelBCs, ChannelModelBCs,
+    BoundaryCondition,
+    Periodic, Flux, Gradient, Value, Dirchlet, Neumann,
+    CoordinateBoundaryConditions,
+    FieldBoundaryConditions, HorizontallyPeriodicBCs, ChannelBCs,
+    BoundaryConditions, SolutionBoundaryConditions, HorizontallyPeriodicSolutionBCs, ChannelSolutionBCs,
     getbc, setbc!,
 
-    # Halo regions
-    fill_halo_regions!, zero_halo_regions!,
-
     # Time stepping
-    TimeStepWizard, cell_advection_timescale, update_Δt!, time_step!,
-
-    # Poisson solver
-    PoissonBCs, PPN, PNN,
-    PoissonSolver, PoissonSolverCPU, PoissonSolverGPU,
-    solve_poisson_3d!, solve_poisson_3d_ppn_gpu_planned!,
+    TimeStepWizard,
+    update_Δt!, time_step!,
 
     # Clock
     Clock,
 
     # Models
-    Model, ChannelModel,
+    Model, BasicModel, ChannelModel, BasicChannelModel,
 
     # Model output writers
-    OutputWriter, NetCDFOutputWriter, JLD2OutputWriter, Checkpointer,
-    write_output, read_output, restore_from_checkpoint,
+    NetCDFOutputWriter, 
+    Checkpointer, restore_from_checkpoint, read_output,
+    JLD2OutputWriter, FieldOutput, FieldOutputs,
 
     # Model diagnostics
-    Diagnostic, run_diagnostic, HorizontalAverage, NaNChecker,
+    HorizontalAverage, NaNChecker, 
+    Timeseries, CFL, AdvectiveCFL, DiffusiveCFL, FieldMaximum,
 
     # Package utilities
-    prettytime, pretty_filesize,
-    KiB, MiB, GiB, TiB,
+    prettytime, pretty_filesize, KiB, MiB, GiB, TiB,
 
     # Turbulence closures
-    TurbulenceClosures, ConstantIsotropicDiffusivity, ConstantAnisotropicDiffusivity,
+    ConstantIsotropicDiffusivity, ConstantAnisotropicDiffusivity,
     ConstantSmagorinsky, AnisotropicMinimumDissipation
 
 # Standard library modules
@@ -93,13 +83,41 @@ import
     CUDAapi,
     GPUifyLoops
 
-import CUDAapi: has_cuda
-import GPUifyLoops: @launch, @loop, @unroll
+using Base: @propagate_inbounds
+using Statistics: mean
+using CUDAapi: has_cuda
+using GPUifyLoops: @launch, @loop, @unroll
 
 import Base:
-    size, length,
-    getindex, lastindex, setindex!,
-    iterate, similar, *, +, -
+    +, -, *,
+    size, length, eltype,
+    iterate, similar, show,
+    getindex, lastindex, setindex!
+
+#####
+##### Abstract types 
+#####
+
+abstract type AbstractModel end
+abstract type AbstractArchitecture end
+abstract type AbstractEquationOfState end
+abstract type AbstractGrid{T} end
+abstract type AbstractField{A, G} end
+abstract type AbstractFaceField{A, G} <: AbstractField{A, G} end
+abstract type AbstractPoissonSolver end
+abstract type AbstractOutputWriter end
+abstract type AbstractDiagnostic end
+abstract type AbstractTimeseriesDiagnostic <: AbstractDiagnostic end
+
+#####
+##### All the code
+#####
+
+struct CPU <: AbstractArchitecture end
+struct GPU <: AbstractArchitecture end
+
+device(::CPU) = GPUifyLoops.CPU()
+device(::GPU) = GPUifyLoops.CUDA()
 
 macro hascuda(ex)
     return has_cuda() ? :($(esc(ex))) : :(nothing)
@@ -115,22 +133,10 @@ end
     end
 end
 
-abstract type Architecture end
-struct CPU <: Architecture end
-struct GPU <: Architecture end
+architecture(::Array) = CPU()
+@hascuda architecture(::CuArray) = GPU()
 
-device(::CPU) = GPUifyLoops.CPU()
-device(::GPU) = GPUifyLoops.CUDA()
-
-abstract type ConstantsCollection end
-abstract type EquationOfState end
-abstract type Grid{T} end
-abstract type AbstractModel end
-abstract type Field{A, G} end
-abstract type FaceField{A, G} <: Field{A, G} end
-abstract type OutputWriter end
-abstract type Diagnostic end
-abstract type PoissonSolver end
+function buoyancy_perturbation end
 
 include("utils.jl")
 

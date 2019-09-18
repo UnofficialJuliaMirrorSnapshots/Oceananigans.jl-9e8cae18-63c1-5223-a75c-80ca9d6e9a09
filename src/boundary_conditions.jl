@@ -17,24 +17,23 @@ const Neumann = Gradient
     BoundaryCondition(BCType, condition)
 
 Construct a boundary condition of `BCType` with `condition`,
-where `BCType` is `Flux` or `Gradient`. `condition` may be a
-number, array, or a function with signature:
+where `condition` may be a number, array, or a function with signature:
 
-    `condition(i, j, grid, t, iter, U, Φ) = # function definition`
+    `condition(i, j, grid, time, iteration, U, Φ, parameters) = # function definition`
 
-where `i` and `j` are indices along the boundary.
+`i` and `j` are indices along the boundary.
 """
 struct BoundaryCondition{C<:BCType, T}
     condition :: T
 end
 
-# Some abbreviations to make our life easier.
-const BC = BoundaryCondition
-const FBC = BoundaryCondition{<:Flux}
-const PBC = BoundaryCondition{<:Periodic}
+# Some abbreviations to make life easier.
+const BC   = BoundaryCondition
+const FBC  = BoundaryCondition{<:Flux}
+const PBC  = BoundaryCondition{<:Periodic}
 const NPBC = BoundaryCondition{<:NoPenetration}
-const VBC = BoundaryCondition{<:Value}
-const GBC = BoundaryCondition{<:Gradient}
+const VBC  = BoundaryCondition{<:Value}
+const GBC  = BoundaryCondition{<:Gradient}
 const NFBC = BoundaryCondition{Flux, Nothing}
 
 BoundaryCondition(Tbc, c) = BoundaryCondition{Tbc, typeof(c)}(c)
@@ -47,6 +46,14 @@ Adapt.adapt_structure(to, b::BC{C, A}) where {C<:BCType, A<:AbstractArray} =
 PeriodicBC() = BoundaryCondition(Periodic, nothing)
 NoPenetrationBC() = BoundaryCondition(NoPenetration, nothing)
 NoFluxBC() = BoundaryCondition(Flux, nothing)
+
+# Multiple dispatch on the type of boundary condition
+getbc(bc::BC{C, <:Number}, args...)              where C = bc.condition
+getbc(bc::BC{C, <:AbstractArray}, i, j, args...) where C = bc.condition[i, j]
+getbc(bc::BC{C, <:Function}, args...)            where C = bc.condition(args...)
+
+Base.getindex(bc::BC{C, <:AbstractArray}, inds...) where C = getindex(bc.condition, inds...)
+
 
 
 #####
@@ -87,6 +94,7 @@ getbc(cbc::CBC, ::Val{S}) where S = getfield(cbc, S)
 getbc(cbc::CBC, ::Val{:bottom}) = getfield(cbc, :right)
 getbc(cbc::CBC, ::Val{:top}) = getfield(cbc, :left)
 
+
 #####
 ##### Boundary conditions for Fields
 #####
@@ -95,29 +103,30 @@ getbc(cbc::CBC, ::Val{:top}) = getfield(cbc, :left)
     FieldBoundaryConditions(x, y, z)
 
 Construct `FieldBoundaryConditions` for a field.
-A FieldBoundaryCondition has `CoordinateBoundaryConditions` in
+Field boundary conditions have `CoordinateBoundaryCondition`s in
 `x`, `y`, and `z`.
 """
-FieldBoundaryConditions(x, y, z) = (x=x, y=y, z=z)
+const FieldBoundaryConditions = NamedTuple{(:x, :y, :z)}
+
+FieldBoundaryConditions(x, y, z) = FieldBoundaryConditions((x, y, z))
 
 function FieldBoundaryConditions(;
     x = CoordinateBoundaryConditions(),
     y = CoordinateBoundaryConditions(),
-    z = CoordinateBoundaryConditions()
-    )
+    z = CoordinateBoundaryConditions())
     return FieldBoundaryConditions(x, y, z)
 end
 
 """
-    HorizontallyPeriodicBCs(   top = BoundaryCondition(Flux, 0),
-                            bottom = BoundaryCondition(Flux, 0))
+    HorizontallyPeriodicBCs(   top = BoundaryCondition(Flux, nothing),
+                            bottom = BoundaryCondition(Flux, nothing))
 
 Construct horizontally-periodic boundary conditions for ``u``, ``v``, or a
 tracer field with top boundary condition (positive-z) `top`
 and bottom boundary condition (negative-z) `bottom`.
 """
-function HorizontallyPeriodicBCs(;    top = BoundaryCondition(Flux, 0),
-                                   bottom = BoundaryCondition(Flux, 0))
+function HorizontallyPeriodicBCs(;    top = BoundaryCondition(Flux, nothing),
+                                   bottom = BoundaryCondition(Flux, nothing))
 
     x = PeriodicBCs()
     y = PeriodicBCs()
@@ -127,20 +136,20 @@ function HorizontallyPeriodicBCs(;    top = BoundaryCondition(Flux, 0),
 end
 
 """
-    ChannelBCs(;  north = BoundaryCondition(Flux, 0),
-                  south = BoundaryCondition(Flux, 0),
-                    top = BoundaryCondition(Flux, 0),
-                 bottom = BoundaryCondition(Flux, 0))
+    ChannelBCs(;  north = BoundaryCondition(Flux, nothing),
+                  south = BoundaryCondition(Flux, nothing),
+                    top = BoundaryCondition(Flux, nothing),
+                 bottom = BoundaryCondition(Flux, nothing))
 
 Construct 'channel' boundary conditions (periodic in ``x``, non-periodic in
 ``y`` and ``z``) for ``u`` or a tracer field. The keywords `north`, `south`,
 `top` and `bottom` correspond to boundary conditions in the positive ``y``,
 negative ``y``, positive ``z`, and negative ``z`` directions respectively.
 """
-function ChannelBCs(;  north = BoundaryCondition(Flux, 0),
-                       south = BoundaryCondition(Flux, 0),
-                         top = BoundaryCondition(Flux, 0),
-                      bottom = BoundaryCondition(Flux, 0)
+function ChannelBCs(;  north = BoundaryCondition(Flux, nothing),
+                       south = BoundaryCondition(Flux, nothing),
+                         top = BoundaryCondition(Flux, nothing),
+                      bottom = BoundaryCondition(Flux, nothing)
                     )
 
     x = PeriodicBCs()
@@ -150,47 +159,57 @@ function ChannelBCs(;  north = BoundaryCondition(Flux, 0),
     return FieldBoundaryConditions(x, y, z)
 end
 
+
 #####
-##### Boundary conditions for entire models
+##### Boundary conditions for solutions to systems of equations
 #####
 
 """
-    ModelBoundaryConditions(u, v, w, T, S)
+    SolutionBoundaryConditions(u, v, w, T, S)
 
-Construct a NamedTuple of boundary conditions for a model
-with solution fields `u`, `v`, `w`, `T`, and `S`.
+Construct a NamedTuple of boundary conditions for a system of
+equations with solution fields `u`, `v`, `w`, `T`, and `S`.
 """
-ModelBoundaryConditions(u, v, w, T, S) = (u=u, v=v, w=w, T=T, S=S)
+SolutionBoundaryConditions(u, v, w, T, S) = (u=u, v=v, w=w, T=T, S=S)
 
 """
-    HorizontallyPeriodicModelBCs(u=HorizontallyPeriodicBCs, ...)
+    HorizontallyPeriodicSolutionBCs(u=HorizontallyPeriodicBCs, ...)
 
 Construct a NamedTuple of boundary conditions for a horizontally-periodic
-model with solution fields `u`, `v`, `w`, `T`, and `S`. Non-default
+system of equations with solution fields `u`, `v`, `w`, `T`, and `S`. Non-default
 boundary conditions for any field must be horizontally-periodic.
 """
-function HorizontallyPeriodicModelBCs(;
+function HorizontallyPeriodicSolutionBCs(;
     u = HorizontallyPeriodicBCs(),
     v = HorizontallyPeriodicBCs(),
     w = HorizontallyPeriodicBCs(top=NoPenetrationBC(), bottom=NoPenetrationBC()),
     T = HorizontallyPeriodicBCs(),
     S = HorizontallyPeriodicBCs()
    )
-    return ModelBoundaryConditions(u, v, w, T, S)
+    return SolutionBoundaryConditions(u, v, w, T, S)
 end
 
-function ChannelModelBCs(;
+"""
+    ChannelSolutionBCs(u=ChannelBCs, ...)
+
+Construct a NamedTuple of boundary conditions for a system of equations
+with solution fields `u`, `v`, `w`, `T`, and `S` in a re-entrant 
+channel geometry with rigid top, bottom, north, and south boundaries (y, z),
+and periodic boundary conditions in east and west (x).
+"""
+function ChannelSolutionBCs(;
     u = ChannelBCs(),
     v = ChannelBCs(north=NoPenetrationBC(), south=NoPenetrationBC()),
     w = ChannelBCs(top=NoPenetrationBC(), bottom=NoPenetrationBC()),
     T = ChannelBCs(),
     S = ChannelBCs()
    )
-    return ModelBoundaryConditions(u, v, w, T, S)
+    return SolutionBoundaryConditions(u, v, w, T, S)
 end
 
-# Default
-const BoundaryConditions = HorizontallyPeriodicModelBCs
+# Default semantics
+const BoundaryConditions = HorizontallyPeriodicSolutionBCs
+
 
 #####
 ##### Tendency and pressure boundary condition "translators":
@@ -202,21 +221,21 @@ const BoundaryConditions = HorizontallyPeriodicModelBCs
 #####     on the north-south horizontal velocity, v.
 #####
 
-TendencyBC(::BC) = BoundaryCondition(Flux, 0)
+TendencyBC(::BC) = BoundaryCondition(Flux, nothing)
 TendencyBC(::PBC) = PeriodicBC()
 TendencyBC(::NPBC) = NoPenetrationBC()
 
 TendencyCoordinateBCs(bcs) = CoordinateBoundaryConditions(TendencyBC(bcs.left), TendencyBC(bcs.right))
 
-TendencyFieldBoundaryConditions(fieldbcs) = 
-    NamedTuple{(:x, :y, :z)}(Tuple(TendencyCoordinateBCs(bcs) for bcs in fieldbcs))
+TendencyFieldBoundaryConditions(field_bcs) = 
+    FieldBoundaryConditions(Tuple(TendencyCoordinateBCs(bcs) for bcs in field_bcs))
 
-TendenciesBoundaryConditions(modelbcs) =
-    NamedTuple{propertynames(modelbcs)}(Tuple(TendencyFieldBoundaryConditions(bcs) for bcs in modelbcs))
+TendenciesBoundaryConditions(solution_bcs) =
+    NamedTuple{propertynames(solution_bcs)}(Tuple(TendencyFieldBoundaryConditions(bcs) for bcs in solution_bcs))
 
 # Pressure boundary conditions are either zero flux (Neumann) or Periodic.
 # Note that a zero flux boundary condition is simpler than a zero gradient boundary condition.
-PressureBC(::BC) = BoundaryCondition(Flux, 0)
+PressureBC(::BC) = BoundaryCondition(Flux, nothing)
 PressureBC(::PBC) = PeriodicBC()
 
 function PressureBoundaryConditions(vbcs)
@@ -225,6 +244,22 @@ function PressureBoundaryConditions(vbcs)
     z = CoordinateBoundaryConditions(PressureBC(vbcs.z.left), PressureBC(vbcs.z.right))
     return (x=x, y=y, z=z)
 end
+
+#####
+##### Model boundary conditions for pressure, and solution, and tendency solutions
+#####
+
+const ModelBoundaryConditions = NamedTuple{(:solution, :tendency, :pressure)}
+
+function ModelBoundaryConditions(solution_boundary_conditions::NamedTuple)
+    model_boundary_conditions = (solution = solution_boundary_conditions, 
+                                 tendency = TendenciesBoundaryConditions(solution_boundary_conditions),
+                                 pressure = PressureBoundaryConditions(solution_boundary_conditions.v))
+    return model_boundary_conditions
+end
+
+ModelBoundaryConditions(model_boundary_conditions::ModelBoundaryConditions) =
+    model_boundary_conditions
 
 #####
 ##### Algorithm for adding fluxes associated with non-trivial flux boundary conditions.
@@ -238,7 +273,7 @@ const NotFluxBC = Union{VBC, GBC, PBC, NPBC, NFBC}
 apply_z_bcs!(Gc, arch, grid, ::NotFluxBC, ::NotFluxBC, args...) = nothing
 
 """
-    apply_z_bcs!(Gc, arch, grid, top_bc, bottom_bc, t, iter, U, Φ)
+    apply_z_bcs!(Gc, arch, grid, top_bc, bottom_bc, boundary_condition_args...)
 
 Apply flux boundary conditions to `c` by adding the associated flux divergence to the 
 source term `Gc`.
@@ -248,14 +283,7 @@ function apply_z_bcs!(Gc, arch, grid, top_bc, bottom_bc, args...)
     return
 end
 
-# Multiple dispatch on the type of boundary condition
-getbc(bc::BC{C, <:Number}, args...)              where C = bc.condition
-getbc(bc::BC{C, <:AbstractArray}, i, j, args...) where C = bc.condition[i, j]
-getbc(bc::BC{C, <:Function}, args...)            where C = bc.condition(args...)
-
-Base.getindex(bc::BC{C, <:AbstractArray}, inds...) where C = getindex(bc.condition, inds...)
-
-# Fall back functions for non-Flux boundary conditions.
+# Fall back functions for boundary conditions that are not of type Flux.
 @inline apply_z_top_bc!(args...) = nothing
 @inline apply_z_bottom_bc!(args...) = nothing
 
@@ -264,7 +292,7 @@ Base.getindex(bc::BC{C, <:AbstractArray}, inds...) where C = getindex(bc.conditi
 @inline apply_z_bottom_bc!(Gc, ::NFBC, args...) = nothing
 
 """
-    apply_z_top_bc!(Gc, top_bc, i, j, grid, t, iter, U, Φ)
+    apply_z_top_bc!(Gc, top_bc, i, j, grid, boundary_condition_args...)
 
 Add the part of flux divergence associated with a top boundary condition on c.
 Note that because
@@ -274,14 +302,14 @@ Note that because
 A positive top flux is associated with a *decrease* in `Gc` near the top boundary.
 If `top_bc.condition` is a function, the function must have the signature
 
-    `top_bc.condition(i, j, grid, t, iter, U, Φ)`
+    `top_bc.condition(i, j, grid, boundary_condition_args...)
 
 """
 @inline apply_z_top_bc!(Gc, top_flux::BC{<:Flux}, i, j, grid, args...) =
     @inbounds Gc[i, j, 1] -= getbc(top_flux, i, j, grid, args...) / grid.Δz
 
 """
-    apply_z_bottom_bc!(Gc, bottom_bc, i, j, grid, t, iter, U, Φ)
+    apply_z_bottom_bc!(Gc, bottom_bc, i, j, grid, boundary_condition_args...)
 
 Add the flux divergence associated with a bottom flux boundary condition on c.
 Note that because
@@ -291,14 +319,14 @@ Note that because
 A positive bottom flux is associated with an *increase* in `Gc` near the bottom boundary.
 If `bottom_bc.condition` is a function, the function must have the signature
 
-    `bottom_bc.condition(i, j, grid, t, iter, U, Φ)`
+    `bottom_bc.condition(i, j, grid, boundary_condition_args...)
 
 """
 @inline apply_z_bottom_bc!(Gc, bottom_flux::BC{<:Flux}, i, j, grid, args...) =
     @inbounds Gc[i, j, grid.Nz] += getbc(bottom_flux, i, j, grid, args...) / grid.Δz
 
 """
-    apply_z_bcs!(top_bc, bottom_bc, grid, c, Gc, κ, closure, t, iter, U, Φ)
+    apply_z_bcs!(Gc, grid, top_bc, bottom_bc, boundary_condition_args...)
 
 Apply a top and/or bottom boundary condition to variable c.
 """
