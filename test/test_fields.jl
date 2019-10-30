@@ -19,20 +19,7 @@ function.
 function correct_field_value_was_set(arch, grid, fieldtype, val::Number)
     f = fieldtype(arch, grid)
     set!(f, val)
-    return data(f) ≈ val * ones(size(f))
-end
-
-function correct_field_addition(arch, grid, fieldtype, val1::Number, val2::Number)
-    f1 = fieldtype(arch, grid)
-    f2 = fieldtype(arch, grid)
-
-    set!(f1, val1)
-    set!(f2, val2)
-    f3 = f1 + f2
-
-    val3 = convert(mm.float_type, val1) + convert(mm.float_type, val2)
-    f_ans = val3 * ones(size(f1))
-    return f3.data ≈ f_ans
+    return interior(f) ≈ val * ones(size(f))
 end
 
 @testset "Fields" begin
@@ -46,7 +33,7 @@ end
     @testset "Field initialization" begin
         println("  Testing field initialization...")
         for arch in archs, FT in float_types
-            grid = RegularCartesianGrid(FT, N, L)
+            grid = RegularCartesianGrid(FT; size=N, length=L)
 
             for fieldtype in fieldtypes
                 @test correct_field_size(arch, grid, fieldtype)
@@ -65,7 +52,7 @@ end
         println("  Testing field setting...")
 
         for arch in archs, FT in float_types
-            grid = RegularCartesianGrid(FT, N, L)
+            grid = RegularCartesianGrid(FT; size=N, length=L)
 
             for fieldtype in fieldtypes, val in vals
                 @test correct_field_value_was_set(arch, grid, fieldtype, val)

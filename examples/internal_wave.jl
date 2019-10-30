@@ -15,7 +15,7 @@ Lx = 2π  # domain extent
 
 # We set up an internal wave with the pressure field
 #
-# $$ p(x, y, z, t) = a(x, z) cos(kx + mz - \omega t) $$ .
+# $ p(x, y, z, t) = a(x, z) cos(kx + mz - ω t) $.
 #
 # where `m` is the vertical wavenumber, `k` is the horizontal wavenumber,
 # `ω` is the wave frequncy, and `a(x, z)` is a Gaussian envelope.
@@ -56,7 +56,7 @@ a(x, z) = A * exp( -( (x - x₀)^2 + (z - z₀)^2 ) / 2δ^2 )
 u₀(x, y, z) = a(x, z) * U * cos(k*x + m*z)
 v₀(x, y, z) = a(x, z) * V * sin(k*x + m*z)
 w₀(x, y, z) = a(x, z) * W * cos(k*x + m*z)
-b₀(x, y, z) = a(x, z) * B * sin(k*x + m*z) + N^2 * z 
+b₀(x, y, z) = a(x, z) * B * sin(k*x + m*z) + N^2 * z
 
 # We are now ready to instantiate our model on a uniform grid.
 # We give the model a constant rotation rate with background vorticity `f`,
@@ -64,9 +64,9 @@ b₀(x, y, z) = a(x, z) * B * sin(k*x + m*z) + N^2 * z
 # and diffusivity to stabilize the model.
 
 model = Model(
-        grid = RegularCartesianGrid(N=(Nx, 1, Nx), L=(Lx, Lx, Lx)),
+        grid = RegularCartesianGrid(size=(Nx, 1, Nx), length=(Lx, Lx, Lx)),
      closure = ConstantIsotropicDiffusivity(ν=1e-6, κ=1e-6),
-    coriolis = FPlane(f=f), 
+    coriolis = FPlane(f=f),
      tracers = :b,
     buoyancy = BuoyancyTracer()
 )
@@ -84,8 +84,8 @@ set!(model, u=u₀, v=v₀, w=w₀, b=b₀)
 xplot(u) = repeat(dropdims(xnodes(u), dims=2), 1, u.grid.Nz)
 zplot(u) = repeat(dropdims(znodes(u), dims=2), u.grid.Nx, 1)
 
-function plot_field!(ax, w, t)
-    pcolormesh(xplot(w), zplot(w), data(model.velocities.w)[:, 1, :])
+function plot_field!(ax, w, t) 
+    pcolormesh(xplot(w), zplot(w), interior(model.velocities.w)[:, 1, :])
     xlabel(L"x")
     ylabel(L"z")
     title(@sprintf("\$ \\omega t / 2 \\pi = %.2f\$", t*ω/2π))
@@ -95,13 +95,15 @@ function plot_field!(ax, w, t)
 end
 
 close("all")
-fig, ax = subplots()
+fig, ax = subplots();
 
 # ## A wave packet on the loose
 #
-# Finally, we release the packet:
+# Finally, we release the packet and plot its trajectory:
 
 for i = 1:10
     time_step!(model, Nt = 200, Δt = 0.001 * 2π/ω)
     plot_field!(ax, model.velocities.w, model.clock.time)
 end
+
+gcf()

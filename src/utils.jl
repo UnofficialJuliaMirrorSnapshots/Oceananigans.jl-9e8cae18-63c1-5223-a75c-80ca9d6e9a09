@@ -7,6 +7,23 @@ Adapt.adapt_structure(to, x::OffsetArray) = OffsetArray(adapt(to, parent(x)), x.
 #    SubArray(adapt(to, parent(A)), adapt.(Ref(to), parentindices(A)))
 
 ####
+#### Convinient macro
+####
+
+macro loop_xyz(i, j, k, grid, expr)
+    return esc(
+        quote
+            @loop for $k in (1:$grid.Nz; (blockIdx().z - 1) * blockDim().z + threadIdx().z)
+                @loop for $j in (1:$grid.Ny; (blockIdx().y - 1) * blockDim().y + threadIdx().y)
+                    @loop for $i in (1:$grid.Nx; (blockIdx().x - 1) * blockDim().x + threadIdx().x)
+                        $expr
+                    end
+                end
+            end
+        end)
+end
+        
+####
 #### Convinient definitions
 ####
 
@@ -185,21 +202,6 @@ parenttuple(obj) = Tuple(f.data.parent for f in obj)
 @inline datatuple(obj::NamedTuple) = NamedTuple{propertynames(obj)}(datatuple(o) for o in obj)
 @inline datatuples(objs...) = (datatuple(obj) for obj in objs)
 
-function getindex(t::NamedTuple, r::AbstractUnitRange{<:Real})
-    n = length(r)
-    n == 0 && return NamedTuple()
-    elems = Vector{eltype(t)}(undef, n)
-    names = Vector{Symbol}(undef, n)
-    o = first(r) - 1
-    for i = 1:n
-        elem = t[o + i]
-        name = propertynames(t)[o + i]
-        @inbounds elems[i] = elem
-        @inbounds names[i] = name
-    end
-    NamedTuple{Tuple(names)}(Tuple(elems))
-end
-
 ####
 #### Dynamic launch configuration
 ####
@@ -258,7 +260,7 @@ Ensure that frequency and interval are not both `nothing`.
 """
 function validate_interval(frequency, interval)
     isnothing(frequency) && isnothing(interval) && @error "Must specify a frequency or interval!"
-    return
+    return nothing
 end
 
 has_interval(obj) = :interval in propertynames(obj) && obj.interval != nothing
@@ -289,8 +291,25 @@ function time_to_run(clock, output_writer)
 end
 
 #####
-##### Model initialization
+##### Utils for models
 #####
+
+function ordered_dict_show(dict, padchar) 
+    if length(dict) == 0
+        return string(typeof(dict), " with no entries")
+    elseif length(dict) == 1
+        return string(typeof(dict), " with 1 entry:", '\n',
+                      padchar, "   └── ", dict.keys[1], " => ", typeof(dict.vals[1]))
+    else
+        return string(typeof(dict), " with $(length(dict)) entries:", '\n',
+                      Tuple(string(padchar, 
+                                   "   ├── ", name, " => ", typeof(dict[name]), '\n') 
+                            for name in dict.keys[1:end-1]
+                           )...,
+                           padchar, "   └── ", dict.keys[end], " => ", typeof(dict.vals[end])
+                      )
+    end
+end
 
 """
     with_tracers(tracers, initial_tuple, tracer_default)

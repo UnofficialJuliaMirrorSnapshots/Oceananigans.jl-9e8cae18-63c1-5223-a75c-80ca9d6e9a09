@@ -7,73 +7,69 @@ function getmodelfield(fieldname, model)
     return field
 end
 
-function u_relative_error(model, u)
-    u_num = model.velocities.u
-    u_ans = FaceFieldX(u.(nodes(u_num)..., model.clock.time), model.grid)
-    return mean((data(u_num) .- u_ans.data).^2 ) / mean(u_ans.data.^2)
-end
-
-function w_relative_error(model, w)
-    w_num = model.velocities.w
-    w_ans = FaceFieldZ(w.(nodes(w_num)..., model.clock.time), model.grid)
-    return mean((data(w_num) .- w_ans.data).^2 ) / mean(w_ans.data.^2)
-end
-
-function T_relative_error(model, T)
-    T_num = model.tracers.T
-    T_ans = CellField(T.(nodes(T_num)..., model.clock.time), model.grid)
-    return mean((data(T_num) .- T_ans.data).^2 ) / mean(T_ans.data.^2)
+function relative_error(u_num, u, time)
+    u_ans = Field(location(u_num), architecture(u_num), u_num.grid)
+    set!(u_ans, (x, y, z) -> u(x, y, z, time))
+    return mean((interior(u_num) .- interior(u_ans)).^2 ) / mean(interior(u_ans).^2)
 end
 
 function test_diffusion_simple(fieldname)
-    model = BasicModel(N=(1, 1, 16), L=(1, 1, 1), ν=1, κ=1, buoyancy=nothing)
+    grid = RegularCartesianGrid(size=(1, 1, 16), length=(1, 1, 1))
+    closure = ConstantIsotropicDiffusivity(ν=1, κ=1)
+    model = Model(grid=grid, closure=closure, buoyancy=nothing)
     field = getmodelfield(fieldname, model)
     value = π
-    data(field) .= value
+    interior(field) .= value
     time_step!(model, 10, 0.01)
-    field_data = data(field)
+    field_data = interior(field)
 
     return !any(@. !isapprox(value, field_data))
 end
 
 function test_diffusion_budget_default(fieldname)
-    model = BasicModel(N=(1, 1, 16), L=(1, 1, 1), ν=1, κ=1, buoyancy=nothing)
+    grid = RegularCartesianGrid(size=(1, 1, 16), length=(1, 1, 1))
+    closure = ConstantIsotropicDiffusivity(ν=1, κ=1)
+    model = Model(grid=grid, closure=closure, buoyancy=nothing)
     field = getmodelfield(fieldname, model)
     half_Nz = round(Int, model.grid.Nz/2)
-    data(field)[:, :,   1:half_Nz] .= -1
-    data(field)[:, :, half_Nz:end] .=  1
+    interior(field)[:, :,   1:half_Nz] .= -1
+    interior(field)[:, :, half_Nz:end] .=  1
 
     return test_diffusion_budget(field, model, model.closure.ν, model.grid.Lz)
 end
 
 function test_diffusion_budget_channel(fieldname)
-    model = BasicChannelModel(N=(1, 16, 4), L=(1, 1, 1), ν=1, κ=1, buoyancy=nothing)
+    grid = RegularCartesianGrid(size=(1, 16, 4), length=(1, 1, 1))
+    closure = ConstantIsotropicDiffusivity(ν=1, κ=1)
+    model = ChannelModel(grid=grid, closure=closure, buoyancy=nothing)
     field = getmodelfield(fieldname, model)
     half_Ny = round(Int, model.grid.Ny/2)
-    data(field)[:, 1:half_Ny,   :] .= -1
-    data(field)[:, half_Ny:end, :] .=  1
+    interior(field)[:, 1:half_Ny,   :] .= -1
+    interior(field)[:, half_Ny:end, :] .=  1
 
     return test_diffusion_budget(field, model, model.closure.ν, model.grid.Ly)
 end
 
 function test_diffusion_budget(field, model, κ, L)
-    mean_init = mean(data(field))
+    mean_init = mean(interior(field))
     time_step!(model, 100, 1e-4 * L^2 / κ)
-    return isapprox(mean_init, mean(data(field)))
+    return isapprox(mean_init, mean(interior(field)))
 end
 
 function test_diffusion_cosine(fieldname)
     Nz, Lz, κ, m = 128, π/2, 1, 2
-    model = BasicModel(N=(1, 1, Nz), L=(1, 1, Lz), ν=κ, κ=κ, buoyancy=nothing)
+    grid = RegularCartesianGrid(size=(1, 1, Nz), length=(1, 1, Lz))
+    closure = ConstantIsotropicDiffusivity(ν=κ, κ=κ)
+    model = Model(grid=grid, closure=closure, buoyancy=nothing)
     field = getmodelfield(fieldname, model)
 
     zC = model.grid.zC
-    data(field)[1, 1, :] .= cos.(m*zC)
+    interior(field)[1, 1, :] .= cos.(m*zC)
 
     diffusing_cosine(κ, m, z, t) = exp(-κ*m^2*t) * cos(m*z)
 
     time_step!(model, 100, 1e-6 * Lz^2 / κ) # Use small time-step relative to diff. time-scale
-    field_numerical = dropdims(data(field), dims=(1, 2))
+    field_numerical = dropdims(interior(field), dims=(1, 2))
 
     return !any(@. !isapprox(field_numerical, diffusing_cosine(κ, m, zC, model.clock.time), atol=1e-6, rtol=1e-6))
 end
@@ -115,15 +111,16 @@ function internal_wave_test(; N=128, Nt=10)
     b₀(x, y, z) = b(x, y, z, 0)
 
     # Create a model where temperature = buoyancy.
-    model = BasicModel(N=(N, 1, N), L=(L, L, L), ν=ν, κ=κ, buoyancy=BuoyancyTracer(), tracers=:b,
-                       coriolis=FPlane(f=f))
+    grid = RegularCartesianGrid(size=(N, 1, N), length=(L, L, L))
+    closure = ConstantIsotropicDiffusivity(ν=ν, κ=κ)
+    model = Model(grid=grid, closure=closure, buoyancy=BuoyancyTracer(), tracers=:b, coriolis=FPlane(f=f))
 
     set_ic!(model, u=u₀, v=v₀, w=w₀, b=b₀)
 
     time_step!(model, Nt, Δt)
 
     # Tolerance was found by trial and error...
-    u_relative_error(model, u) < 1e-4
+    return relative_error(model.velocities.u, u, model.clock.time) < 1e-4
 end
 
 function passive_tracer_advection_test(; N=128, κ=1e-12, Nt=100)
@@ -137,33 +134,37 @@ function passive_tracer_advection_test(; N=128, κ=1e-12, Nt=100)
     v₀(x, y, z) = V
     T₀(x, y, z) = T(x, y, z, 0)
 
-    model = BasicModel(N=(N, N, 2), L=(L, L, L), ν=κ, κ=κ)
+    grid = RegularCartesianGrid(size=(N, N, 2), length=(L, L, L))
+    closure = ConstantIsotropicDiffusivity(ν=κ, κ=κ)
+    model = Model(grid=grid, closure=closure)
 
     set_ic!(model, u=u₀, v=v₀, T=T₀)
     time_step!(model, Nt, Δt)
 
     # Error tolerance is a bit arbitrary
-    return T_relative_error(model, T) < 1e-4
+    return relative_error(model.tracers.T, T, model.clock.time) < 1e-4
 end
 
 """
-Pearson vortex test
-See p. 310 of "Nodal Discontinuous Galerkin Methods: Algorithms, Analysis, and Application" by Hesthaven & Warburton.
+Taylor-Green vortex test
+See: https://en.wikipedia.org/wiki/Taylor%E2%80%93Green_vortex#Taylor%E2%80%93Green_vortex_solution
+     and p. 310 of "Nodal Discontinuous Galerkin Methods: Algorithms, Analysis, and Application" by Hesthaven & Warburton.
 """
-function pearson_vortex_test(arch; FT=Float64, N=64, Nt=10)
+function taylor_green_vortex_test(arch; FT=Float64, N=64, Nt=10)
     Nx, Ny, Nz = N, N, 2
     Lx, Ly, Lz = 1, 1, 1
     ν = 1
 
-    # Choose a very small time step ~O(1/Δx²) as we are diffusion-limited in this test.
-    Δt = (Lx/Nx)^2 / (10π*ν)
+    # Choose a very small time step as we are diffusion-limited in this test: Δt ≤ Δx² / 2ν
+    Δx = Lx / Nx
+    Δt = (1/10π) * Δx^2 / ν
 
-    # Pearson vortex analytic solution.
+    # Taylor-Green vortex analytic solution.
     @inline u(x, y, z, t) = -sin(2π*y) * exp(-4π^2 * ν * t)
     @inline v(x, y, z, t) =  sin(2π*x) * exp(-4π^2 * ν * t)
 
     model = Model(architecture = arch,
-                          grid = RegularCartesianGrid(FT; N=(Nx, Ny, Nz), L=(Lx, Ly, Lz)),
+                          grid = RegularCartesianGrid(FT; size=(Nx, Ny, Nz), length=(Lx, Ly, Lz)),
                        closure = ConstantIsotropicDiffusivity(FT; ν=1, κ=0),  # Turn off diffusivity.
                        tracers = nothing,
                       buoyancy = nothing) # turn off buoyancy
@@ -181,15 +182,15 @@ function pearson_vortex_test(arch; FT=Float64, N=64, Nt=10)
     i = model.clock.iteration
 
     # Calculate relative error between model and analytic solutions for u and v.
-    u_rel_err = abs.((data(model.velocities.u) .- u.(xF, yC, zC, t)) ./ u.(xF, yC, zC, t))
+    u_rel_err = abs.((interior(model.velocities.u) .- u.(xF, yC, zC, t)) ./ u.(xF, yC, zC, t))
     u_rel_err_avg = mean(u_rel_err)
     u_rel_err_max = maximum(u_rel_err)
 
-    v_rel_err = abs.((data(model.velocities.v) .- v.(xC, yF, zC, t)) ./ v.(xC, yF, zC, t))
+    v_rel_err = abs.((interior(model.velocities.v) .- v.(xC, yF, zC, t)) ./ v.(xC, yF, zC, t))
     v_rel_err_avg = mean(v_rel_err)
     v_rel_err_max = maximum(v_rel_err)
 
-    @info "Pearson vortex test ($arch, $FT) with Nx=Ny=$N @ Nt=$Nt: " *
+    @info "Taylor-Green vortex test ($arch, $FT) with Nx=Ny=$N @ Nt=$Nt: " *
           @sprintf("Δu: (avg=%6.3g, max=%6.3g), Δv: (avg=%6.3g, max=%6.3g)\n",
                    u_rel_err_avg, u_rel_err_max, v_rel_err_avg, v_rel_err_max)
 
@@ -234,8 +235,8 @@ end
         @test internal_wave_test()
     end
 
-    @testset "Pearson vortex" begin
-        println("  Testing Pearson vortex...")
-        @test pearson_vortex_test(CPU())
+    @testset "Taylor-Green vortex" begin
+        println("  Testing Taylor-Green vortex...")
+        @test taylor_green_vortex_test(CPU())
     end
 end

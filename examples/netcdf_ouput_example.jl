@@ -8,7 +8,7 @@ Nx, Ny, Nz = 16, 16, 16       # No. of grid points in x, y, and z, respectively.
 Lx, Ly, Lz = 100, 100, 100    # Length of the domain in x, y, and z, respectively (m).
 tf = 5000                     # Length of the simulation (s)
 
-model = Model(grid=RegularCartesianGrid(N=(Nx, Ny, Nz), L=(Lx, Ly, Lz)),
+model = Model(grid=RegularCartesianGrid(size=(Nx, Ny, Nz), length=(Lx, Ly, Lz)),
               closure=ConstantIsotropicDiffusivity())
 
 # Add a cube-shaped warm temperature anomaly that takes up the middle 50%
@@ -43,8 +43,8 @@ globalattrib = Dict("f" => 1e-4, "name" => "Thermal bubble expt 1")
 # as their dimension. Ranges also can be specified (e.g. xC=2:10)
 subsetwriter = NetCDFOutputWriter(model, outputs;
                                   interval=10, filename="dump_subset.nc",
-                                  outputattrib=outputattrib,
-                                  globalattrib=globalattrib,
+                                  output_attributes=outputattrib,
+                                  global_attributes=globalattrib,
                                   xC=5, xF=6)
 push!(model.output_writers, subsetwriter)
 
@@ -74,5 +74,5 @@ while model.clock.time < tf
 end
 
 # Close the NetCDFOutputWriter
-OWClose(subsetwriter)
-OWClose(globalwriter)
+close(subsetwriter)
+close(globalwriter)

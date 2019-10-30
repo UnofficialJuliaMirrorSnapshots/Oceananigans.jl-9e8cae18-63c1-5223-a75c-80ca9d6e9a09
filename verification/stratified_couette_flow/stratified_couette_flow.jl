@@ -108,7 +108,7 @@ function simulate_stratified_couette_flow(; Nxy, Nz, arch=GPU(), h=1, U_wall=1, 
 
     model = Model(
        architecture = arch,
-               grid = RegularCartesianGrid(N = (Nxy, Nxy, Nz), L = (4π*h, 2π*h, 2h)),
+               grid = RegularCartesianGrid(size = (Nxy, Nxy, Nz), length = (4π*h, 2π*h, 2h)),
            buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(α=1.0, β=0.0)),
             closure = AnisotropicMinimumDissipation(ν=ν, κ=κ),
 boundary_conditions = HorizontallyPeriodicSolutionBCs(u=ubcs, v=vbcs, T=Tbcs),
@@ -187,12 +187,12 @@ boundary_conditions = HorizontallyPeriodicSolutionBCs(u=ubcs, v=vbcs, T=Tbcs),
     #### Set up profile output writer
     ####
 
-    Uavg = HorizontalAverage(model, model.velocities.u;       return_type=Array)
-    Vavg = HorizontalAverage(model, model.velocities.v;       return_type=Array)
-    Wavg = HorizontalAverage(model, model.velocities.w;       return_type=Array)
-    Tavg = HorizontalAverage(model, model.tracers.T;          return_type=Array)
-    νavg = HorizontalAverage(model, model.diffusivities.νₑ;   return_type=Array)
-    κavg = HorizontalAverage(model, model.diffusivities.κₑ.T; return_type=Array)
+    Uavg = HorizontalAverage(model.velocities.u;       return_type=Array)
+    Vavg = HorizontalAverage(model.velocities.v;       return_type=Array)
+    Wavg = HorizontalAverage(model.velocities.w;       return_type=Array)
+    Tavg = HorizontalAverage(model.tracers.T;          return_type=Array)
+    νavg = HorizontalAverage(model.diffusivities.νₑ;   return_type=Array)
+    κavg = HorizontalAverage(model.diffusivities.κₑ.T; return_type=Array)
 
     profiles = Dict(
          :u => model -> Uavg(model),
@@ -257,4 +257,3 @@ boundary_conditions = HorizontallyPeriodicSolutionBCs(u=ubcs, v=vbcs, T=Tbcs),
                 wizard.Δt, prettytime(walltime / Ni))
     end
 end
-

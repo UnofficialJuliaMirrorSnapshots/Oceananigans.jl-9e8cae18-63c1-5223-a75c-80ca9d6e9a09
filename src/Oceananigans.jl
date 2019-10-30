@@ -12,16 +12,17 @@ export
     CPU, GPU,
 
     # Constants
-    FPlane,
+    FPlane, BetaPlane,
     second, minute, hour, day,
 
     # Grids
     RegularCartesianGrid,
 
-    # Fields
+    # Fields and field manipulation
     Field, CellField, FaceFieldX, FaceFieldY, FaceFieldZ,
-    data, set!, set_ic!,
+    interior, set!, set_ic!,
     nodes, xnodes, ynodes, znodes,
+    compute_w_from_continuity!,
 
     # Forcing functions
     ModelForcing, SimpleForcing,
@@ -45,11 +46,11 @@ export
     Clock,
 
     # Models
-    Model, BasicModel, ChannelModel, BasicChannelModel,
+    Model, ChannelModel, NonDimensionalModel,
 
     # Model output writers
     Checkpointer, restore_from_checkpoint, read_output,
-    JLD2OutputWriter, FieldOutput, FieldOutputs,
+    JLD2OutputWriter, NetCDFOutputWriter, FieldOutput, FieldOutputs,
     write_grid, NetCDFOutputWriter,
 
     # Model diagnostics
@@ -90,7 +91,7 @@ using CUDAapi: has_cuda
 using GPUifyLoops: @launch, @loop, @unroll
 
 import Base:
-    +, -, *,
+    +, -, *, /,
     size, length, eltype,
     iterate, similar, show,
     getindex, lastindex, setindex!,
@@ -136,11 +137,12 @@ Abstract supertype for fields stored on an architecture `A` and defined on a gri
 abstract type AbstractField{A, G} end
 
 """
-    AbstractFaceField{A, G} <: AbstractField{A, G}
+    AbstractLocatedField{X, Y, Z, A, G}
 
-Abstract supertype for fields stored on an architecture `A` and defined the cell faces of a grid `G`.
+Abstract supertype for fields located at `(X, Y, Z)`, stored on an architecture `A`,
+and defined on a grid `G`.
 """
-abstract type AbstractFaceField{A, G} <: AbstractField{A, G} end
+abstract type AbstractLocatedField{X, Y, Z, A, G} <: AbstractField{A, G} end
 
 """
     AbstractEquationOfState
@@ -203,9 +205,6 @@ Run Oceananigans on a single NVIDIA CUDA GPU.
 """
 struct GPU <: AbstractArchitecture end
 
-device(::CPU) = GPUifyLoops.CPU()
-device(::GPU) = GPUifyLoops.CUDA()
-
 """
     @hascuda expr
 
@@ -226,6 +225,9 @@ end
     end
 end
 
+device(::CPU) = GPUifyLoops.CPU()
+device(::GPU) = GPUifyLoops.CUDA()
+
 architecture(::Array) = CPU()
 @hascuda architecture(::CuArray) = GPU()
 
@@ -233,6 +235,9 @@ architecture(::Array) = CPU()
 function buoyancy_perturbation end
 function buoyancy_frequency_squared end
 function TracerFields end
+function TimeStepper end
+function run_diagnostic end
+function write_output end
 
 include("utils.jl")
 
@@ -241,6 +246,9 @@ include("grids.jl")
 include("fields.jl")
 
 include("Operators/Operators.jl")
+
+using .Operators: div_f2c # used in diagnostics.jl
+
 include("TurbulenceClosures/TurbulenceClosures.jl")
 
 using .TurbulenceClosures
@@ -252,9 +260,14 @@ include("halo_regions.jl")
 include("poisson_solvers.jl")
 include("forcing.jl")
 include("models.jl")
-include("time_steppers.jl")
+
+include("TimeSteppers/TimeSteppers.jl")
+
+using .TimeSteppers
 
 include("output_writers.jl")
 include("diagnostics.jl")
+
+include("AbstractOperations/AbstractOperations.jl")
 
 end # module
