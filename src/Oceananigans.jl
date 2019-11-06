@@ -12,7 +12,6 @@ export
     CPU, GPU,
 
     # Constants
-    FPlane, BetaPlane,
     second, minute, hour, day,
 
     # Grids
@@ -27,16 +26,21 @@ export
     # Forcing functions
     ModelForcing, SimpleForcing,
 
-    # Equation of state
+    # Coriolis forces
+    FPlane, BetaPlane,
+
+    # Buoyancy and equations of state
     BuoyancyTracer, SeawaterBuoyancy, LinearEquationOfState,
+
+    # Surface waves via Craik-Leibovich equations
+    SurfaceWaves,
 
     # Boundary conditions
     BoundaryCondition,
     Periodic, Flux, Gradient, Value, Dirchlet, Neumann,
-    CoordinateBoundaryConditions,
-    FieldBoundaryConditions, HorizontallyPeriodicBCs, ChannelBCs,
+    CoordinateBoundaryConditions, FieldBoundaryConditions, HorizontallyPeriodicBCs, ChannelBCs,
     BoundaryConditions, SolutionBoundaryConditions, HorizontallyPeriodicSolutionBCs, ChannelSolutionBCs,
-    getbc, setbc!,
+    BoundaryFunction, getbc, setbc!,
 
     # Time stepping
     TimeStepWizard,
@@ -48,20 +52,12 @@ export
     # Models
     Model, ChannelModel, NonDimensionalModel,
 
-    # Model output writers
-    Checkpointer, restore_from_checkpoint, read_output,
-    JLD2OutputWriter, NetCDFOutputWriter, FieldOutput, FieldOutputs,
-    write_grid, NetCDFOutputWriter,
-
-    # Model diagnostics
-    HorizontalAverage, NaNChecker,
-    Timeseries, CFL, AdvectiveCFL, DiffusiveCFL, FieldMaximum,
-
     # Package utilities
     prettytime, pretty_filesize, KiB, MiB, GiB, TiB,
 
     # Turbulence closures
     ConstantIsotropicDiffusivity, ConstantAnisotropicDiffusivity,
+    AnisotropicBiharmonicDiffusivity,
     ConstantSmagorinsky, AnisotropicMinimumDissipation
 
 # Standard library modules
@@ -231,9 +227,12 @@ device(::GPU) = GPUifyLoops.CUDA()
 architecture(::Array) = CPU()
 @hascuda architecture(::CuArray) = GPU()
 
-# Place-holder functions for use in TurbulenceClosures module
+# Place-holder functions
 function buoyancy_perturbation end
 function buoyancy_frequency_squared end
+function ∂x_b end
+function ∂y_b end
+function ∂z_b end
 function TracerFields end
 function TimeStepper end
 function run_diagnostic end
@@ -242,7 +241,10 @@ function write_output end
 include("utils.jl")
 
 include("clock.jl")
-include("grids.jl")
+include("Grids/Grids.jl")
+
+using .Grids
+
 include("fields.jl")
 
 include("Operators/Operators.jl")
@@ -255,19 +257,25 @@ using .TurbulenceClosures
 
 include("coriolis.jl")
 include("buoyancy.jl")
+include("SurfaceWaves.jl")
 include("boundary_conditions.jl")
 include("halo_regions.jl")
-include("poisson_solvers.jl")
+include("Solvers/Solvers.jl")
+
+using .Solvers
+
 include("forcing.jl")
 include("models.jl")
+
+include("Diagnostics/Diagnostics.jl")
+include("OutputWriters/OutputWriters.jl")
 
 include("TimeSteppers/TimeSteppers.jl")
 
 using .TimeSteppers
 
-include("output_writers.jl")
-include("diagnostics.jl")
-
 include("AbstractOperations/AbstractOperations.jl")
+
+using .SurfaceWaves
 
 end # module
